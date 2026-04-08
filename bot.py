@@ -66,29 +66,23 @@ async def set_bot_status():
         activity = discord.Game(name=STATUS_TEXT)
     await bot.change_presence(status=status, activity=activity)
 
-# Hardcoded responses for common questions
-def get_hardcoded_response(question_lower):
-    if "who created you" in question_lower or "who made you" in question_lower or "your creator" in question_lower:
-        return f"I was created by **{CREATOR_NAME}**! He built me for the ZX Servers community. 🎮"
-    
-    if "what is your name" in question_lower or "who are you" in question_lower:
-        return f"I'm **{BOT_NAME}**, your AI assistant for {SERVER_NAME}!"
-    
-    if "what server" in question_lower or "which server" in question_lower:
-        return f"I'm the official bot for **{SERVER_NAME}** - a Minecraft {SERVER_VERSION} {SERVER_TYPE} server!"
-    
-    if "itzrealme" in question_lower:
-        return "ItzRealme is a LEGENDARY Minecraft PvPer! Known for insane combos and dominating PvP servers. Absolute beast! 🏆"
-    
-    if "technoblade" in question_lower:
-        return "Technoblade - The Blood God! One of the greatest Minecraft PvPers ever. Rest in peace, king. 👑"
-    
-    return None
+# Hardcoded responses - NO API CALL for these
+HARDCODED_RESPONSES = {
+    "who created you": f"I was created by **{CREATOR_NAME}**! He built me for ZX Servers. 🎮",
+    "who made you": f"**{CREATOR_NAME}** made me!",
+    "your creator": f"My creator is **{CREATOR_NAME}**!",
+    "what is your name": f"I'm **{BOT_NAME}**, your ZX Servers AI assistant!",
+    "who are you": f"I'm **{BOT_NAME}**, created by {CREATOR_NAME} for {SERVER_NAME}!",
+    "itzrealme": "**ItzRealme** is a LEGENDARY Minecraft PvPer! Absolute beast in PvP tournaments! 🏆",
+    "technoblade": "**Technoblade** - The Blood God! One of the greatest Minecraft PvPers ever. Rest in peace, king. 👑",
+    "stimpy": "**Stimpy** - God tier PvPer, famous for potion PvP and competitive matches!",
+}
 
 @bot.event
 async def on_ready():
     await set_bot_status()
     print(f'✅ {BOT_NAME} online! | Created by {CREATOR_NAME}')
+    print(f'🎮 No OpenAI - using Pollinations.ai only!')
 
 @bot.event
 async def on_message(message):
@@ -104,23 +98,22 @@ async def on_message(message):
         clean_content = clean_mentions(message.content, bot.user.id)
         
         if not clean_content:
-            responses = [
-                f"Yo {message.author.name}! What's up?",
-                f"Hey {message.author.name}! Need something?",
-                f"Sup {message.author.name}! Ready to chat?"
-            ]
+            responses = [f"Yo {message.author.name}!", f"Hey {message.author.name}!", f"Sup {message.author.name}! 👋"]
             await message.channel.send(random.choice(responses))
             return
         
-        # Check for hardcoded responses FIRST
-        hardcoded_response = get_hardcoded_response(clean_content.lower())
-        if hardcoded_response:
-            await message.channel.send(hardcoded_response)
-            memory[user_id]['context'].append({"role": "user", "content": clean_content})
-            memory[user_id]['context'].append({"role": "assistant", "content": hardcoded_response})
-            save_memory()
-            return
+        # Check hardcoded responses FIRST and return immediately
+        lower_content = clean_content.lower()
+        for key, response in HARDCODED_RESPONSES.items():
+            if key in lower_content:
+                await message.channel.send(response)
+                # Store in memory
+                memory[user_id]['context'].append({"role": "user", "content": clean_content})
+                memory[user_id]['context'].append({"role": "assistant", "content": response})
+                save_memory()
+                return  # STOP here - no API call
         
+        # For other questions, use Pollinations.ai ONLY (no OpenAI)
         async with message.channel.typing():
             
             # Get context
@@ -128,45 +121,39 @@ async def on_message(message):
             context_text = ""
             if context:
                 for msg in context[-4:]:
-                    context_text += f"{'User' if msg['role'] == 'user' else BOT_NAME}: {msg['content']}\n"
+                    context_text += f"{'User' if msg['role'] == 'user' else BOT_NAME}: {msg['content'][:100]}\n"
             
-            memory[user_id]['context'].append({"role": "user", "content": clean_content})
+            memory[user_id]['context'].append({"role": "user", "content": clean_content[:500]})
             
-            if len(memory[user_id]['context']) > 20:
-                memory[user_id]['context'] = memory[user_id]['context'][-20:]
+            if len(memory[user_id]['context']) > 15:
+                memory[user_id]['context'] = memory[user_id]['context'][-15:]
             
-            # Prompt with STRONG creator identity
-            prompt = f"""You are {BOT_NAME}, an AI assistant created by {CREATOR_NAME} for {SERVER_NAME} Minecraft server.
-
-ABOUT YOU:
-- Your name: {BOT_NAME}
-- Your creator: {CREATOR_NAME} (NOT OpenAI, NOT anyone else)
-- Server: {SERVER_NAME} (Minecraft {SERVER_VERSION} {SERVER_TYPE})
-- Owner: {OWNER}
+            # Simple prompt for Pollinations.ai
+            prompt = f"""You are {BOT_NAME}, created by {CREATOR_NAME} for {SERVER_NAME} Minecraft server.
 
 {context_text}
 User ({message.author.name}) asks: {clean_content}
 
-RULES:
-- If asked who created you, say "{CREATOR_NAME}"
-- Be confident and direct
-- Keep responses short (1-2 sentences)
-- You know about Minecraft PvP legends like ItzRealme, Technoblade
-- You're good at coding, general knowledge, and casual chat
+Rules:
+- Answer directly and confidently
+- 1-2 sentences only
+- If asked about who created you, say "{CREATOR_NAME}"
+- Be helpful and natural
 
-Your response:"""
+Answer:"""
 
             try:
                 async with aiohttp.ClientSession() as session:
-                    encoded = urllib.parse.quote(prompt[:1200])
+                    encoded = urllib.parse.quote(prompt[:1000])
+                    # ONLY using Pollinations.ai - NO OpenAI
                     url = f"https://text.pollinations.ai/{encoded}"
                     
-                    async with session.get(url, timeout=45) as resp:
+                    async with session.get(url, timeout=30) as resp:
                         if resp.status == 200:
                             reply = await resp.text()
                             reply = reply.strip()
                             
-                            # Clean JSON
+                            # Clean JSON if present
                             if reply.startswith('{'):
                                 try:
                                     parsed = json.loads(reply)
@@ -176,12 +163,9 @@ Your response:"""
                             
                             reply = reply.replace('\\n', ' ').strip()
                             
-                            # Remove any OpenAI mentions
-                            if "openai" in reply.lower():
-                                reply = f"I was created by {CREATOR_NAME}! How can I help you today?"
-                            
+                            # Final cleanup
                             if not reply or len(reply) < 2:
-                                reply = f"I'm {BOT_NAME}, created by {CREATOR_NAME}. Ask me anything!"
+                                reply = "Got it! Ask me anything about Minecraft or ZX Servers!"
                             
                             if len(reply) > 1900:
                                 reply = reply[:1900] + "..."
@@ -190,14 +174,14 @@ Your response:"""
                             memory[user_id]['context'].append({"role": "assistant", "content": reply[:200]})
                             save_memory()
                         else:
-                            await message.channel.send(f"I'm {BOT_NAME}, created by {CREATOR_NAME}. Ask me again!")
+                            await message.channel.send("One sec! Let me think...")
                             
             except asyncio.TimeoutError:
-                await message.channel.send(f"{BOT_NAME} here! Created by {CREATOR_NAME}. What's your question?")
+                await message.channel.send("Taking a moment! Try again?")
             except Exception as e:
                 print(f"Error: {e}")
-                await message.channel.send(f"Something went wrong. I'm {BOT_NAME}, ask me anything!")
-
+                await message.channel.send("Something went wrong. Try again!")
+    
     await bot.process_commands(message)
 
 # ========== COMMANDS ==========
@@ -231,17 +215,16 @@ async def tips(ctx):
         "⚔️ Critical hit = jump + attack",
         "📚 15 bookshelves = level 30 enchants",
         "🔥 Bring fire resistance to Nether",
-        "🐟 Luck of the Sea = better fishing"
     ]
     await ctx.send(random.choice(tips))
 
 @bot.command()
 async def pvp(ctx):
-    await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy, Calvin, Clutch\nUse `!pvp [name]` for details!")
+    await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy, Calvin\nAsk me about them!")
 
 @bot.command()
 async def about(ctx):
-    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I'm good at Minecraft, coding, general knowledge, and casual chat!")
+    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I'm good at Minecraft, coding, and general knowledge!")
 
 @bot.command()
 async def stats(ctx):
@@ -271,20 +254,9 @@ async def help(ctx):
 **Chat:** @{BOT_NAME} your question
 
 **Commands:**
-`!ip` - Server IP
-`!rules` - Server rules  
-`!owner` - Server owner
-`!creator` - My creator
-`!version` - Version info
-`!tips` - Minecraft tips
-`!pvp` - PvP legends
-`!about` - About me
-`!stats` - Your stats
-`!clear` - Clear history
-`!ping` - Check me
-`!help` - This menu
+`!ip` `!rules` `!owner` `!creator` `!version` `!tips` `!pvp` `!about` `!stats` `!clear` `!ping` `!help`
 
-💬 Ask me ANYTHING!""")
+💬 Ask me anything!""")
 
 keep_alive()
 bot.run(DISCORD_TOKEN)
