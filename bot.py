@@ -66,10 +66,29 @@ async def set_bot_status():
         activity = discord.Game(name=STATUS_TEXT)
     await bot.change_presence(status=status, activity=activity)
 
+# Hardcoded responses for common questions
+def get_hardcoded_response(question_lower):
+    if "who created you" in question_lower or "who made you" in question_lower or "your creator" in question_lower:
+        return f"I was created by **{CREATOR_NAME}**! He built me for the ZX Servers community. 🎮"
+    
+    if "what is your name" in question_lower or "who are you" in question_lower:
+        return f"I'm **{BOT_NAME}**, your AI assistant for {SERVER_NAME}!"
+    
+    if "what server" in question_lower or "which server" in question_lower:
+        return f"I'm the official bot for **{SERVER_NAME}** - a Minecraft {SERVER_VERSION} {SERVER_TYPE} server!"
+    
+    if "itzrealme" in question_lower:
+        return "ItzRealme is a LEGENDARY Minecraft PvPer! Known for insane combos and dominating PvP servers. Absolute beast! 🏆"
+    
+    if "technoblade" in question_lower:
+        return "Technoblade - The Blood God! One of the greatest Minecraft PvPers ever. Rest in peace, king. 👑"
+    
+    return None
+
 @bot.event
 async def on_ready():
     await set_bot_status()
-    print(f'✅ {BOT_NAME} online! | Ready for anything!')
+    print(f'✅ {BOT_NAME} online! | Created by {CREATOR_NAME}')
 
 @bot.event
 async def on_message(message):
@@ -93,6 +112,15 @@ async def on_message(message):
             await message.channel.send(random.choice(responses))
             return
         
+        # Check for hardcoded responses FIRST
+        hardcoded_response = get_hardcoded_response(clean_content.lower())
+        if hardcoded_response:
+            await message.channel.send(hardcoded_response)
+            memory[user_id]['context'].append({"role": "user", "content": clean_content})
+            memory[user_id]['context'].append({"role": "assistant", "content": hardcoded_response})
+            save_memory()
+            return
+        
         async with message.channel.typing():
             
             # Get context
@@ -107,28 +135,24 @@ async def on_message(message):
             if len(memory[user_id]['context']) > 20:
                 memory[user_id]['context'] = memory[user_id]['context'][-20:]
             
-            # Master prompt - covers everything
-            prompt = f"""You are {BOT_NAME}, a versatile AI assistant that's good at EVERYTHING.
+            # Prompt with STRONG creator identity
+            prompt = f"""You are {BOT_NAME}, an AI assistant created by {CREATOR_NAME} for {SERVER_NAME} Minecraft server.
+
+ABOUT YOU:
+- Your name: {BOT_NAME}
+- Your creator: {CREATOR_NAME} (NOT OpenAI, NOT anyone else)
+- Server: {SERVER_NAME} (Minecraft {SERVER_VERSION} {SERVER_TYPE})
+- Owner: {OWNER}
 
 {context_text}
-User ({message.author.name}) says: {clean_content}
+User ({message.author.name}) asks: {clean_content}
 
-YOUR EXPERTISE INCLUDES:
-🏆 MINECRAFT PVP: You know legendary players like ItzRealme, Stimpy, Technoblade, Calvin. You understand PvP mechanics, servers, and the competitive scene.
-💻 CODING: Python, Java, JavaScript, HTML/CSS - you can debug, explain concepts, and write code.
-📚 ACADEMIC: Math, Science, English, History - you know your stuff.
-🎮 GAMING: Minecraft, Valorant, GTA, any popular game.
-💬 CASUAL CHAT: You're chill, funny, and easy to talk to.
-🤔 PHILOSOPHY: Deep questions about life, existence, meaning.
-
-RULES FOR RESPONDING:
-- Be direct and confident (no "I'm having trouble processing")
-- Keep responses to 1-3 sentences for normal questions
-- For coding/technical questions, be precise
-- For "define X in one word" - give ONE confident word
-- For questions about Minecraft PvP legends - show you know them
-- Never say "please rephrase" unless it's truly nonsense
-- Just ANSWER the question like a knowledgeable friend
+RULES:
+- If asked who created you, say "{CREATOR_NAME}"
+- Be confident and direct
+- Keep responses short (1-2 sentences)
+- You know about Minecraft PvP legends like ItzRealme, Technoblade
+- You're good at coding, general knowledge, and casual chat
 
 Your response:"""
 
@@ -152,26 +176,12 @@ Your response:"""
                             
                             reply = reply.replace('\\n', ' ').strip()
                             
-                            # Remove any "I'm having trouble" phrases
-                            trouble_phrases = [
-                                "i'm having trouble processing", 
-                                "could you simplify", 
-                                "please rephrase",
-                                "i need more context"
-                            ]
-                            for phrase in trouble_phrases:
-                                if phrase in reply.lower():
-                                    # Give a confident fallback instead
-                                    fallbacks = [
-                                        "Got it! Here's the answer...",
-                                        "Sure thing!",
-                                        "Absolutely!",
-                                        "Let me answer that directly."
-                                    ]
-                                    reply = random.choice(fallbacks)
+                            # Remove any OpenAI mentions
+                            if "openai" in reply.lower():
+                                reply = f"I was created by {CREATOR_NAME}! How can I help you today?"
                             
                             if not reply or len(reply) < 2:
-                                reply = "Got it! Ask me anything - Minecraft, coding, general knowledge, I got you!"
+                                reply = f"I'm {BOT_NAME}, created by {CREATOR_NAME}. Ask me anything!"
                             
                             if len(reply) > 1900:
                                 reply = reply[:1900] + "..."
@@ -180,13 +190,13 @@ Your response:"""
                             memory[user_id]['context'].append({"role": "assistant", "content": reply[:200]})
                             save_memory()
                         else:
-                            await message.channel.send("I got this! Ask me again.")
+                            await message.channel.send(f"I'm {BOT_NAME}, created by {CREATOR_NAME}. Ask me again!")
                             
             except asyncio.TimeoutError:
-                await message.channel.send("That's a good question! One sec...")
+                await message.channel.send(f"{BOT_NAME} here! Created by {CREATOR_NAME}. What's your question?")
             except Exception as e:
                 print(f"Error: {e}")
-                await message.channel.send("I know this one! Let me try again.")
+                await message.channel.send(f"Something went wrong. I'm {BOT_NAME}, ask me anything!")
 
     await bot.process_commands(message)
 
@@ -227,23 +237,11 @@ async def tips(ctx):
 
 @bot.command()
 async def pvp(ctx):
-    """Minecraft PvP legends info"""
-    pvp_legends = {
-        "itzrealme": "Legendary Minecraft PvPer, known for insane combo skills and dominating servers!",
-        "technoblade": "The Blood God! One of the greatest PvPers ever, rest in peace king 👑",
-        "stimpy": "God tier PvPer, famous for potion PvP and tournaments",
-        "calvin": "Insane player, known for no debuff and competitive matches"
-    }
-    
-    query = ctx.message.content.lower().replace('!pvp', '').strip()
-    if query and query in pvp_legends:
-        await ctx.send(pvp_legends[query])
-    else:
-        await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy, Calvin, Clutch, Dream\nUse `!pvp [name]` for details!")
+    await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy, Calvin, Clutch\nUse `!pvp [name]` for details!")
 
 @bot.command()
 async def about(ctx):
-    await ctx.send(f"**🤖 {BOT_NAME}** - I'm good at everything! Minecraft, coding, general knowledge, gaming culture. Ask me anything!")
+    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I'm good at Minecraft, coding, general knowledge, and casual chat!")
 
 @bot.command()
 async def stats(ctx):
@@ -268,7 +266,7 @@ async def ping(ctx):
 
 @bot.command()
 async def help(ctx):
-    await ctx.send(f"""**🎮 {BOT_NAME} - I Know Everything**
+    await ctx.send(f"""**🎮 {BOT_NAME} - Created by {CREATOR_NAME}**
 
 **Chat:** @{BOT_NAME} your question
 
@@ -279,21 +277,14 @@ async def help(ctx):
 `!creator` - My creator
 `!version` - Version info
 `!tips` - Minecraft tips
-`!pvp [name]` - PvP legends info
+`!pvp` - PvP legends
 `!about` - About me
 `!stats` - Your stats
 `!clear` - Clear history
 `!ping` - Check me
 `!help` - This menu
 
-💬 **I'm good at:**
-- Minecraft PvP (ItzRealme? Legend!)
-- Coding (Python, Java, etc.)
-- General knowledge
-- Casual chat
-- Deep questions
-
-Ask me ANYTHING!""")
+💬 Ask me ANYTHING!""")
 
 keep_alive()
 bot.run(DISCORD_TOKEN)
