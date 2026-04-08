@@ -23,14 +23,14 @@ BOT_VERSION = "1.0.0"
 
 MEMORY_FILE = 'zx_memory.json'
 
-# ========== STATUS CONFIGURATION ==========
-STATUS_TYPE = "watching"  # Options: "playing", "watching", "listening", "streaming"
+# ========== STATUS ==========
+STATUS_TYPE = "watching"
 STATUS_TEXT = f"{SERVER_NAME} | {SERVER_VERSION}"
 STATUS_DND = True
-# ============================================
+# ============================
 
 if not DISCORD_TOKEN:
-    print("❌ ERROR: DISCORD_TOKEN environment variable not set!")
+    print("❌ ERROR: DISCORD_TOKEN not set!")
     exit(1)
 
 intents = discord.Intents.default()
@@ -38,7 +38,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None, reconnect=True)
 
-# Memory for conversations
+# Memory
 if os.path.exists(MEMORY_FILE):
     with open(MEMORY_FILE, 'r') as f:
         memory = json.load(f)
@@ -49,158 +49,133 @@ def save_memory():
     try:
         with open(MEMORY_FILE, 'w') as f:
             json.dump(memory, f)
-    except Exception as e:
-        print(f"Error saving memory: {e}")
+    except:
+        pass
 
 def clean_mentions(content, bot_id):
-    """Remove bot mention from message"""
     content = re.sub(f'<@!?{bot_id}>', '', content)
     return content.strip()
 
 async def set_bot_status():
-    """Set the bot's presence and status"""
-    if STATUS_DND:
-        status = discord.Status.dnd
-    else:
-        status = discord.Status.online
-    
-    if STATUS_TYPE.lower() == "playing":
-        activity = discord.Game(name=STATUS_TEXT)
-    elif STATUS_TYPE.lower() == "watching":
+    status = discord.Status.dnd if STATUS_DND else discord.Status.online
+    if STATUS_TYPE == "watching":
         activity = discord.Activity(type=discord.ActivityType.watching, name=STATUS_TEXT)
-    elif STATUS_TYPE.lower() == "listening":
+    elif STATUS_TYPE == "listening":
         activity = discord.Activity(type=discord.ActivityType.listening, name=STATUS_TEXT)
-    elif STATUS_TYPE.lower() == "streaming":
-        activity = discord.Streaming(name=STATUS_TEXT, url="https://twitch.tv/example")
     else:
         activity = discord.Game(name=STATUS_TEXT)
-    
     await bot.change_presence(status=status, activity=activity)
+
+# ========== KNOWLEDGE BASE FOR COMMON TRICKY QUESTIONS ==========
+COMMON_KNOWLEDGE = {
+    "binomials in english": "In English grammar, binomials are fixed pairs of words connected by 'and' or 'or' like 'rock and roll', 'black and white', 'odds and ends', 'give and take'.",
+    "binomials": "This can mean two things: (1) In MATH: algebraic expression with two terms like x+y. (2) In ENGLISH GRAMMAR: word pairs like 'rock and roll'. Please specify which one you mean.",
+    "mro": "MRO (Method Resolution Order) in Python determines the order in which base classes are searched. Python uses C3 linearization. You can check it with ClassName.__mro__",
+    "descriptor": "In Python, descriptors are objects that define how attribute access is handled using __get__, __set__, __delete__. They power properties, methods, and class methods.",
+    "metaclass": "A metaclass in Python is a class of a class. It defines how a class behaves. type is the default metaclass.",
+}
 
 @bot.event
 async def on_ready():
     await set_bot_status()
-    
-    print(f'✅ {BOT_NAME} is online!')
-    print(f'👨‍💻 Created by: {CREATOR_NAME}')
-    print(f'🎮 Serving {SERVER_NAME} - {SERVER_VERSION} {SERVER_TYPE}')
-    print(f'💬 Bot is ready!')
+    print(f'✅ {BOT_NAME} online!')
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
     
-    # Only respond when mentioned or in DM
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         
-        # Initialize user memory
         if user_id not in memory:
             memory[user_id] = {'context': []}
         
-        # Clean the message
-        clean_content = clean_mentions(message.content, bot.user.id)
+        clean_content = clean_mentions(message.content, bot.user.id).lower()
         
-        # Just mention with no text
         if not clean_content:
-            responses = [
-                f"Hello {message.author.name}! How can I help you today?",
-                f"Hi {message.author.name}! Feel free to ask me anything.",
-                f"Greetings {message.author.name}! I'm here to help."
-            ]
-            await message.channel.send(random.choice(responses))
+            await message.channel.send(f"Hello {message.author.name}! How can I help?")
             return
         
-        # Show typing indicator
         async with message.channel.typing():
             
-            # Get conversation context (shorter for complex questions)
+            # Check knowledge base first
+            quick_answer = None
+            for key, answer in COMMON_KNOWLEDGE.items():
+                if key in clean_content:
+                    quick_answer = answer
+                    break
+            
+            if quick_answer:
+                await message.channel.send(quick_answer)
+                memory[user_id]['context'].append({"role": "user", "content": clean_content})
+                memory[user_id]['context'].append({"role": "assistant", "content": quick_answer})
+                save_memory()
+                return
+            
+            # Get context
             context = memory[user_id]['context'][-4:]
             context_text = ""
             if context:
                 for msg in context[-3:]:
                     context_text += f"{'User' if msg['role'] == 'user' else BOT_NAME}: {msg['content'][:100]}\n"
             
-            # Store user message
-            memory[user_id]['context'].append({"role": "user", "content": clean_content[:500]})  # Limit storage
+            memory[user_id]['context'].append({"role": "user", "content": clean_content[:500]})
             
-            # Keep memory limited
             if len(memory[user_id]['context']) > 15:
                 memory[user_id]['context'] = memory[user_id]['context'][-15:]
             
-            # Check if it's a code question
-            is_code = "class" in clean_content or "def " in clean_content or "print(" in clean_content
-            
-            # Build prompt based on complexity
-            if is_code and len(clean_content) > 200:
-                # For long code questions, use a more focused prompt
-                prompt = f"""You are {BOT_NAME}, a programming expert.
+            # Enhanced prompt for accuracy
+            prompt = f"""You are {BOT_NAME}, an accurate AI assistant.
 
-User asks: {clean_content[:800]}
+{context_text}
+User ({message.author.name}) asks: {clean_content}
 
-Answer directly and accurately. If it's a Python code question, explain the output and why. Keep response under 3 sentences. Be precise."""
-            else:
-                prompt = f"""You are {BOT_NAME}, an AI assistant for {SERVER_NAME}.
+CRITICAL RULES:
+1. If a term has multiple meanings (like "binomials" = math OR English grammar), ask for clarification OR give both definitions.
+2. For Python code questions, give the exact output and explain MRO, inheritance, or descriptor behavior.
+3. Be precise - don't guess. If unsure, say "I need more context."
+4. Keep answers to 2-3 sentences unless asked for more detail.
 
-Context: {context_text}
-User ({message.author.name}): {clean_content}
+Answer accurately:"""
 
-Guidelines:
-- Answer directly and accurately
-- Keep response under 3 sentences
-- For code questions, give the output and brief explanation
-- Be helpful and professional
-
-Response:"""
-            
             try:
                 async with aiohttp.ClientSession() as session:
-                    encoded_prompt = urllib.parse.quote(prompt[:1000])  # Limit prompt length
-                    url = f"https://text.pollinations.ai/{encoded_prompt}"
+                    encoded = urllib.parse.quote(prompt[:1000])
+                    url = f"https://text.pollinations.ai/{encoded}"
                     
-                    async with session.get(url, timeout=45) as resp:  # Longer timeout for complex questions
+                    async with session.get(url, timeout=45) as resp:
                         if resp.status == 200:
                             reply = await resp.text()
                             reply = reply.strip()
                             
-                            # Clean up JSON
+                            # Clean JSON
                             if reply.startswith('{'):
                                 try:
                                     parsed = json.loads(reply)
-                                    reply = parsed.get('content', parsed.get('response', str(reply)))
+                                    reply = parsed.get('content', str(reply))
                                 except:
                                     reply = re.sub(r'\{[^{}]*\}', '', reply)
                             
-                            reply = reply.replace('\\n', '\n').replace('\\"', '"')
+                            reply = reply.replace('\\n', ' ').strip()
                             
-                            # Remove reasoning content
-                            if 'reasoning_content' in reply:
-                                lines = reply.split('\n')
-                                clean_lines = [l for l in lines if 'reasoning' not in l.lower()]
-                                reply = '\n'.join(clean_lines) if clean_lines else "Here's the answer to your question."
-                            
-                            # Fallback
-                            if not reply or len(reply) < 2:
-                                reply = "I understand your question. Let me help you with that."
+                            if not reply or len(reply) < 5:
+                                reply = "Let me think about that. Could you rephrase or provide more context?"
                             
                             if len(reply) > 1900:
                                 reply = reply[:1900] + "..."
                             
                             await message.channel.send(reply)
-                            
-                            # Store bot response
                             memory[user_id]['context'].append({"role": "assistant", "content": reply[:200]})
                             save_memory()
-                            
                         else:
-                            await message.channel.send("I'm having trouble processing that. Could you simplify the question?")
+                            await message.channel.send("Please rephrase your question.")
                             
             except asyncio.TimeoutError:
-                await message.channel.send("This question is complex and taking too long. Could you break it down or simplify?")
+                await message.channel.send("That's a complex question. Could you simplify it?")
             except Exception as e:
                 print(f"Error: {e}")
-                await message.channel.send("I encountered an error processing your request. Please try again.")
+                await message.channel.send("Something went wrong. Please try again.")
     
     await bot.process_commands(message)
 
@@ -208,57 +183,40 @@ Response:"""
 
 @bot.command()
 async def ip(ctx):
-    await ctx.send(f"**{SERVER_NAME} IP:** `{SERVER_IP}`\n**Version:** {SERVER_VERSION} {SERVER_TYPE}")
+    await ctx.send(f"**IP:** `{SERVER_IP}` | {SERVER_VERSION} {SERVER_TYPE}")
 
 @bot.command()
 async def rules(ctx):
-    rules_text = f"""**📜 {SERVER_NAME} Rules**
-
-1. Be respectful to all players
-2. No griefing or stealing
-3. No hacking or exploiting
-4. Have fun and help others
-
-Contact {OWNER} for any issues."""
-    await ctx.send(rules_text)
+    await ctx.send(f"**Rules:** 1. Be respectful 2. No griefing 3. No hacking 4. Have fun!")
 
 @bot.command()
 async def owner(ctx):
-    await ctx.send(f"**Server Owner:** {OWNER}")
+    await ctx.send(f"**Owner:** {OWNER}")
 
 @bot.command()
 async def creator(ctx):
-    await ctx.send(f"**Bot Creator:** {CREATOR_NAME}")
+    await ctx.send(f"**Creator:** {CREATOR_NAME}")
 
 @bot.command()
 async def version(ctx):
-    await ctx.send(f"**Server:** {SERVER_VERSION} {SERVER_TYPE}\n**Bot:** {BOT_VERSION}")
+    await ctx.send(f"**Server:** {SERVER_VERSION} | **Bot:** {BOT_VERSION}")
 
 @bot.command()
 async def tips(ctx):
-    tips_list = [
-        "💎 Diamonds at Y-level 11-12",
-        "🏠 Use stairs and slabs for detailed builds",
-        "🌾 Water hydrates soil up to 4 blocks away",
-        "⚔️ Critical hits = jump + attack",
-        "📚 15 bookshelves = level 30 enchantments",
-        "🔥 Bring fire resistance to the Nether",
-        "🐟 Luck of the Sea = better fishing loot"
-    ]
-    await ctx.send(random.choice(tips_list))
+    tips = ["💎 Diamonds at Y=11-12", "🏠 Stairs+slabs=better builds", "🌾 Water reaches 4 blocks", "⚔️ Crit = jump+hit", "📚 15 bookshelves=lvl30"]
+    await ctx.send(random.choice(tips))
 
 @bot.command()
 async def about(ctx):
-    await ctx.send(f"**🤖 {BOT_NAME}** - Minecraft server assistant\nCreated by {CREATOR_NAME}\nAsk me anything about Minecraft or general knowledge!")
+    await ctx.send(f"**{BOT_NAME}** - Assistant for {SERVER_NAME} | Created by {CREATOR_NAME}")
 
 @bot.command()
 async def stats(ctx):
     user_id = str(ctx.author.id)
-    if user_id in memory and 'context' in memory[user_id]:
-        msg_count = len(memory[user_id]['context'])
-        await ctx.send(f"📊 **{ctx.author.name}** - {msg_count} messages in our conversation.")
+    if user_id in memory:
+        await ctx.send(f"📊 {len(memory[user_id]['context'])} messages with me!")
     else:
-        await ctx.send(f"📊 **{ctx.author.name}** - No conversation history yet.")
+        await ctx.send("📊 No history yet!")
 
 @bot.command()
 async def clear(ctx):
@@ -266,25 +224,17 @@ async def clear(ctx):
     if user_id in memory:
         memory[user_id] = {'context': []}
         save_memory()
-        await ctx.send(f"✅ Conversation history cleared, {ctx.author.name}.")
+        await ctx.send("✅ Cleared!")
 
 @bot.command()
 async def ping(ctx):
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"Pong! 🏓 {latency}ms")
+    await ctx.send(f"Pong! 🏓 {round(bot.latency * 1000)}ms")
 
 @bot.command()
 async def help(ctx):
-    help_text = f"""**🎮 {BOT_NAME} - Help**
-
-**Chat:** @{BOT_NAME} your question
-
-**Commands:**
+    await ctx.send(f"""**{BOT_NAME} Commands:**
 `!ip` `!rules` `!owner` `!creator` `!version` `!tips` `!about` `!stats` `!clear` `!ping` `!help`
-
-**Server:** {SERVER_NAME} ({SERVER_VERSION} {SERVER_TYPE})
-**IP:** {SERVER_IP}"""
-    await ctx.send(help_text)
+💬 Mention @{BOT_NAME} to chat!""")
 
 keep_alive()
 bot.run(DISCORD_TOKEN)
