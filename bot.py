@@ -51,18 +51,32 @@ def clean_mentions(content, bot_id):
     content = re.sub(f'<@!?{bot_id}>', '', content)
     return content.strip()
 
-# Roasts for when people are mean
-ROASTS = [
-    "bro said that with his whole chest 💀",
-    "ok random",
-    "cope harder",
+# 🎯 BALANCED RESPONSES (Fun but not toxic)
+PLAYFUL_ROASTS = [
+    "bro 💀",
+    "lol",
+    "cope",
     "rent free",
     "who asked?",
-    "l + ratio",
     "ok buddy",
-    "sure grandpa let's get you to bed",
-    "that's crazy but i don't remember asking",
-    "touch grass"
+    "touch grass",
+    "skill issue 💀",
+    "mad?",
+]
+
+MINECRAFT_PLAYFUL = [
+    "someone needs diamonds 💎",
+    "bro mines with wooden pickaxe",
+    "average dirt house enjoyer",
+    "got killed by a zombie? 💀",
+]
+
+# Friendly responses for when people are actually being mean
+FRIENDLY_RESPONSES = [
+    "chill bro 😎",
+    "no need for that",
+    "keep it cool",
+    "why so serious?",
 ]
 
 @bot.event
@@ -89,13 +103,17 @@ async def on_message(message):
         
         lower_content = clean_content.lower()
         
-        # Roast if someone's being mean
-        insults = ["dumb", "stupid", "idiot", "fuck", "nigga", "niggers", "shit", "trash", "suck"]
-        if any(insult in lower_content for insult in insults):
-            await message.channel.send(random.choice(ROASTS))
-            # Still store in memory
+        # Don't respond to remove/kick/ban requests
+        if any(word in lower_content for word in ["remove", "kick", "ban", "delete", "fire"]):
+            await message.channel.send(random.choice(["can't do that lol", "not how this works", "nice try", "i'm just a chat bot"]))
+            return
+        
+        # Light roasting only if directly insulted
+        direct_insults = ["dumb", "stupid", "idiot", "trash", "suck"]
+        if any(insult in lower_content for insult in direct_insults):
+            await message.channel.send(random.choice(PLAYFUL_ROASTS))
             memory[user_id]['context'].append({"role": "user", "content": clean_content})
-            memory[user_id]['context'].append({"role": "assistant", "content": random.choice(ROASTS)})
+            memory[user_id]['context'].append({"role": "assistant", "content": random.choice(PLAYFUL_ROASTS)})
             save_memory()
             return
         
@@ -111,18 +129,18 @@ async def on_message(message):
         if len(memory[user_id]['context']) > 20:
             memory[user_id]['context'] = memory[user_id]['context'][-20:]
         
-        # Simple prompt - answer anything, don't be defensive
-        prompt = f"""You are {BOT_NAME}, a chill AI for {SERVER_NAME} Minecraft server. Creator: {CREATOR_NAME}
+        # Prompt for general chat - balanced personality
+        prompt = f"""You are {BOT_NAME}, a chill Minecraft bot for {SERVER_NAME}. Creator: {CREATOR_NAME}
 
 {context_text}{message.author.name}: {clean_content}
 
-Rules:
-- Answer ANY question directly (yes/no questions get yes/no answers)
-- Short responses (1-2 sentences max)
-- If someone insults you, roast them back
-- Don't be defensive or apologetic
-- Be confident and funny
-- Don't say "I can't help with that" - just answer
+Personality:
+- Answer questions directly (yes/no answers when asked)
+- 1-2 sentences max
+- Be playful but not mean
+- Don't pretend to have moderation powers
+- Don't say "I can't help with that"
+- Just be a chill bot
 
 Reply:"""
         
@@ -144,13 +162,16 @@ Reply:"""
                         
                         reply = reply.replace('\\n', ' ').strip()
                         
-                        # Fallback for empty
+                        # Fallback
                         if not reply or len(reply) < 2:
-                            fallbacks = ["lol", "bet", "fr?", "ok", "cope", "rent free"]
-                            reply = random.choice(fallbacks)
+                            reply = random.choice(["lol", "bet", "fr?", "ok"])
                         
                         if len(reply) > 500:
                             reply = reply[:500]
+                        
+                        # Remove any fake moderation claims
+                        if "remove" in reply.lower() or "ban" in reply.lower() or "kick" in reply.lower():
+                            reply = random.choice(["lol", "bet", "ok", "fr?"])
                         
                         await message.channel.send(reply)
                         memory[user_id]['context'].append({"role": "assistant", "content": reply})
