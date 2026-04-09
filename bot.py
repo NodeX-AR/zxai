@@ -8,6 +8,7 @@ import random
 import urllib.parse
 import asyncio
 from keep_alive import keep_alive
+from io import BytesIO
 
 # ========== CONFIGURATION ==========
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
@@ -78,11 +79,43 @@ HARDCODED_RESPONSES = {
     "stimpy": "**Stimpy** - God tier PvPer, famous for potion PvP and competitive matches!",
 }
 
-@bot.event
-async def on_ready():
-    await set_bot_status()
-    print(f'✅ {BOT_NAME} online! | Created by {CREATOR_NAME}')
-    print(f'🎮 No OpenAI - using Pollinations.ai only!')
+# Image generation keywords
+IMAGE_TRIGGERS = ['draw', 'generate', 'create image', 'make image', 'picture of', 'art of', 'render', 'imagine']
+
+def is_image_request(content):
+    """Check if user wants an image"""
+    content_lower = content.lower()
+    # Check for image triggers
+    for trigger in IMAGE_TRIGGERS:
+        if trigger in content_lower:
+            return True
+    # Check if message is short and likely an image prompt
+    if len(content.split()) <= 4 and any(word in content_lower for word in ['dog', 'cat', 'minecraft', 'pvp', 'landscape', 'anime', 'art']):
+        return True
+    return False
+
+async def generate_image(prompt):
+    """Generate image using Pollinations.ai"""
+    try:
+        # Clean and prepare prompt for URL
+        clean_prompt = prompt.strip()[:200]  # Limit prompt length
+        encoded_prompt = urllib.parse.quote(clean_prompt)
+        
+        # Pollinations.ai image generation endpoint
+        # Add parameters for better images
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=30) as response:
+                if response.status == 200:
+                    # Read image data
+                    img_data = await response.read()
+                    return BytesIO(img_data)
+                else:
+                    return None
+    except Exception as e:
+        print(f"Image generation error: {e}")
+        return None
 
 @bot.event
 async def on_message(message):
@@ -102,7 +135,27 @@ async def on_message(message):
             await message.channel.send(random.choice(responses))
             return
         
-        # Check hardcoded responses FIRST and return immediately
+        # Check for image generation requests FIRST
+        if is_image_request(clean_content):
+            async with message.channel.typing():
+                await message.channel.send(f"🎨 Generating image for: **{clean_content[:50]}**...")
+                
+                img_bytes = await generate_image(clean_content)
+                
+                if img_bytes:
+                    # Send as file to avoid link preview issues
+                    file = discord.File(img_bytes, filename="generated_image.png")
+                    await message.channel.send(f"🖼️ Here's your image, {message.author.name}!", file=file)
+                    
+                    # Store in memory
+                    memory[user_id]['context'].append({"role": "user", "content": f"[Image request] {clean_content}"})
+                    memory[user_id]['context'].append({"role": "assistant", "content": "Generated an image"})
+                    save_memory()
+                else:
+                    await message.channel.send("❌ Sorry, I couldn't generate that image. Try a different prompt!")
+            return  # Don't process as text
+        
+        # Check hardcoded responses
         lower_content = clean_content.lower()
         for key, response in HARDCODED_RESPONSES.items():
             if key in lower_content:
@@ -111,9 +164,9 @@ async def on_message(message):
                 memory[user_id]['context'].append({"role": "user", "content": clean_content})
                 memory[user_id]['context'].append({"role": "assistant", "content": response})
                 save_memory()
-                return  # STOP here - no API call
+                return
         
-        # For other questions, use Pollinations.ai ONLY (no OpenAI)
+        # For text questions, use Pollinations.ai for text response
         async with message.channel.typing():
             
             # Get context
@@ -128,7 +181,7 @@ async def on_message(message):
             if len(memory[user_id]['context']) > 15:
                 memory[user_id]['context'] = memory[user_id]['context'][-15:]
             
-            # Simple prompt for Pollinations.ai
+            # Simple prompt for Pollinations.ai text
             prompt = f"""You are {BOT_NAME}, created by {CREATOR_NAME} for {SERVER_NAME} Minecraft server.
 
 {context_text}
@@ -145,7 +198,7 @@ Answer:"""
             try:
                 async with aiohttp.ClientSession() as session:
                     encoded = urllib.parse.quote(prompt[:1000])
-                    # ONLY using Pollinations.ai - NO OpenAI
+                    # Text generation endpoint
                     url = f"https://text.pollinations.ai/{encoded}"
                     
                     async with session.get(url, timeout=30) as resp:
@@ -184,7 +237,37 @@ Answer:"""
     
     await bot.process_commands(message)
 
-# ========== COMMANDS ==========
+# ========== IMAGE COMMANDS ==========
+
+@bot.command()
+async def imagine(ctx, *, prompt):
+    """Generate an image from text - Usage: !imagine a cat playing Minecraft"""
+    if not prompt:
+        await ctx.send("❌ Please provide a prompt! Example: `!imagine a dragon in a castle`")
+        return
+    
+    async with ctx.typing():
+        await ctx.send(f"🎨 Creating image: **{prompt[:50]}**...")
+        
+        img_bytes = await generate_image(prompt)
+        
+        if img_bytes:
+            file = discord.File(img_bytes, filename="generated.png")
+            await ctx.send(f"🖼️ Here's your image, {ctx.author.name}!", file=file)
+        else:
+            await ctx.send("❌ Failed to generate image. Try a different prompt!")
+
+@bot.command()
+async def draw(ctx, *, prompt):
+    """Alias for imagine command"""
+    await imagine(ctx, prompt=prompt)
+
+@bot.command()
+async def render(ctx, *, prompt):
+    """Alias for imagine command"""
+    await imagine(ctx, prompt=prompt)
+
+# ========== TEXT COMMANDS ==========
 
 @bot.command()
 async def ip(ctx):
@@ -224,7 +307,7 @@ async def pvp(ctx):
 
 @bot.command()
 async def about(ctx):
-    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I'm good at Minecraft, coding, and general knowledge!")
+    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I can chat AND generate images! Try `!imagine a cool sword`")
 
 @bot.command()
 async def stats(ctx):
@@ -253,10 +336,15 @@ async def help(ctx):
 
 **Chat:** @{BOT_NAME} your question
 
-**Commands:**
+**Image Commands:**
+`!imagine <prompt>` - Generate an image
+`!draw <prompt>` - Same as imagine
+`!render <prompt>` - Same as imagine
+
+**Text Commands:**
 `!ip` `!rules` `!owner` `!creator` `!version` `!tips` `!pvp` `!about` `!stats` `!clear` `!ping` `!help`
 
-💬 Ask me anything!""")
+💬 Ask me anything or say "@ZX AI draw a Minecraft creeper"!""")
 
 keep_alive()
 bot.run(DISCORD_TOKEN)
