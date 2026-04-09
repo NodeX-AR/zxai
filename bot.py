@@ -21,6 +21,9 @@ CREATOR_NAME = "Aswanth R"
 BOT_NAME = "ZX AI"
 BOT_VERSION = "1.0.0"
 
+# ADD YOUR DISCORD USER ID HERE (right-click on your name in Discord -> Copy User ID)
+OWNER_DISCORD_ID = 1268620138664693881  # REPLACE THIS WITH YOUR ACTUAL DISCORD ID!
+
 MEMORY_FILE = 'zx_memory.json'
 
 # ========== STATUS ==========
@@ -66,23 +69,21 @@ async def set_bot_status():
         activity = discord.Game(name=STATUS_TEXT)
     await bot.change_presence(status=status, activity=activity)
 
-# Hardcoded responses - NO API CALL for these
+# Hardcoded responses
 HARDCODED_RESPONSES = {
     "who created you": f"I was created by **{CREATOR_NAME}**! He built me for ZX Servers. 🎮",
     "who made you": f"**{CREATOR_NAME}** made me!",
     "your creator": f"My creator is **{CREATOR_NAME}**!",
     "what is your name": f"I'm **{BOT_NAME}**, your ZX Servers AI assistant!",
     "who are you": f"I'm **{BOT_NAME}**, created by {CREATOR_NAME} for {SERVER_NAME}!",
-    "itzrealme": "**ItzRealme** is a LEGENDARY Minecraft PvPer! Absolute beast in PvP tournaments! 🏆",
-    "technoblade": "**Technoblade** - The Blood God! One of the greatest Minecraft PvPers ever. Rest in peace, king. 👑",
-    "stimpy": "**Stimpy** - God tier PvPer, famous for potion PvP and competitive matches!",
+    "itzrealme": "**ItzRealme** is a LEGENDARY Minecraft PvPer! Absolute beast! 🏆",
+    "technoblade": "**Technoblade** - The Blood God! Rest in peace, king. 👑",
 }
 
 @bot.event
 async def on_ready():
     await set_bot_status()
     print(f'✅ {BOT_NAME} online! | Created by {CREATOR_NAME}')
-    print(f'🎮 No OpenAI - using Pollinations.ai only!')
 
 @bot.event
 async def on_message(message):
@@ -102,18 +103,16 @@ async def on_message(message):
             await message.channel.send(random.choice(responses))
             return
         
-        # Check hardcoded responses FIRST and return immediately
+        # Check hardcoded responses
         lower_content = clean_content.lower()
         for key, response in HARDCODED_RESPONSES.items():
             if key in lower_content:
                 await message.channel.send(response)
-                # Store in memory
                 memory[user_id]['context'].append({"role": "user", "content": clean_content})
                 memory[user_id]['context'].append({"role": "assistant", "content": response})
                 save_memory()
-                return  # STOP here - no API call
+                return
         
-        # For other questions, use Pollinations.ai ONLY (no OpenAI)
         async with message.channel.typing():
             
             # Get context
@@ -128,16 +127,13 @@ async def on_message(message):
             if len(memory[user_id]['context']) > 15:
                 memory[user_id]['context'] = memory[user_id]['context'][-15:]
             
-            # Simple prompt for Pollinations.ai
-            prompt = f"""You are {BOT_NAME}, created by {CREATOR_NAME} for {SERVER_NAME} Minecraft server.
+            prompt = f"""You are {BOT_NAME}, created by {CREATOR_NAME} for {SERVER_NAME}.
 
 {context_text}
 User ({message.author.name}) asks: {clean_content}
 
 Rules:
-- Answer directly and confidently
-- 1-2 sentences only
-- If asked about who created you, say "{CREATOR_NAME}"
+- Answer directly, 1-2 sentences
 - Be helpful and natural
 
 Answer:"""
@@ -145,7 +141,6 @@ Answer:"""
             try:
                 async with aiohttp.ClientSession() as session:
                     encoded = urllib.parse.quote(prompt[:1000])
-                    # ONLY using Pollinations.ai - NO OpenAI
                     url = f"https://text.pollinations.ai/{encoded}"
                     
                     async with session.get(url, timeout=30) as resp:
@@ -153,7 +148,6 @@ Answer:"""
                             reply = await resp.text()
                             reply = reply.strip()
                             
-                            # Clean JSON if present
                             if reply.startswith('{'):
                                 try:
                                     parsed = json.loads(reply)
@@ -163,9 +157,8 @@ Answer:"""
                             
                             reply = reply.replace('\\n', ' ').strip()
                             
-                            # Final cleanup
                             if not reply or len(reply) < 2:
-                                reply = "Got it! Ask me anything about Minecraft or ZX Servers!"
+                                reply = "Got it! Ask me anything!"
                             
                             if len(reply) > 1900:
                                 reply = reply[:1900] + "..."
@@ -174,13 +167,10 @@ Answer:"""
                             memory[user_id]['context'].append({"role": "assistant", "content": reply[:200]})
                             save_memory()
                         else:
-                            await message.channel.send("One sec! Let me think...")
+                            await message.channel.send("One sec!")
                             
-            except asyncio.TimeoutError:
-                await message.channel.send("Taking a moment! Try again?")
-            except Exception as e:
-                print(f"Error: {e}")
-                await message.channel.send("Something went wrong. Try again!")
+            except:
+                await message.channel.send("Try again!")
     
     await bot.process_commands(message)
 
@@ -214,17 +204,16 @@ async def tips(ctx):
         "🌾 Water reaches 4 blocks",
         "⚔️ Critical hit = jump + attack",
         "📚 15 bookshelves = level 30 enchants",
-        "🔥 Bring fire resistance to Nether",
     ]
     await ctx.send(random.choice(tips))
 
 @bot.command()
 async def pvp(ctx):
-    await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy, Calvin\nAsk me about them!")
+    await ctx.send("🏆 **Minecraft PvP Legends:** ItzRealme, Technoblade, Stimpy\nAsk me about them!")
 
 @bot.command()
 async def about(ctx):
-    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}. I'm good at Minecraft, coding, and general knowledge!")
+    await ctx.send(f"**🤖 {BOT_NAME}** - Created by {CREATOR_NAME} for {SERVER_NAME}")
 
 @bot.command()
 async def stats(ctx):
@@ -233,15 +222,31 @@ async def stats(ctx):
         count = len(memory[user_id]['context'])
         await ctx.send(f"📊 {count} messages with me, {ctx.author.name}!")
     else:
-        await ctx.send(f"📊 No history yet! Mention @{BOT_NAME} to start!")
+        await ctx.send(f"📊 No history yet!")
 
 @bot.command()
 async def clear(ctx):
+    """Clear YOUR conversation history"""
     user_id = str(ctx.author.id)
     if user_id in memory:
         memory[user_id] = {'context': []}
         save_memory()
-        await ctx.send(f"✅ Cleared history, {ctx.author.name}!")
+        await ctx.send(f"✅ Cleared your conversation history, {ctx.author.name}!")
+    else:
+        await ctx.send("No history to clear!")
+
+@bot.command()
+async def reset(ctx):
+    """⚠️ RESET ALL MEMORY for EVERYONE (Owner only)"""
+    # Check if the user is the owner
+    if ctx.author.id == OWNER_DISCORD_ID:
+        global memory
+        memory = {}
+        save_memory()
+        await ctx.send("✅ **FULL RESET COMPLETE!** All conversation memory has been cleared for everyone.")
+        print(f"⚠️ Memory reset by {ctx.author.name} (ID: {ctx.author.id})")
+    else:
+        await ctx.send("❌ Only the server owner can use this command!")
 
 @bot.command()
 async def ping(ctx):
@@ -249,12 +254,24 @@ async def ping(ctx):
 
 @bot.command()
 async def help(ctx):
-    await ctx.send(f"""**🎮 {BOT_NAME} - Created by {CREATOR_NAME}**
+    await ctx.send(f"""**🎮 {BOT_NAME} - Commands**
 
 **Chat:** @{BOT_NAME} your question
 
 **Commands:**
-`!ip` `!rules` `!owner` `!creator` `!version` `!tips` `!pvp` `!about` `!stats` `!clear` `!ping` `!help`
+`!ip` - Server IP
+`!rules` - Server rules  
+`!owner` - Server owner
+`!creator` - My creator
+`!version` - Version info
+`!tips` - Minecraft tips
+`!pvp` - PvP legends
+`!about` - About me
+`!stats` - Your stats
+`!clear` - Clear YOUR history
+`!reset` - Reset ALL memory (owner only)
+`!ping` - Check me
+`!help` - This menu
 
 💬 Ask me anything!""")
 
